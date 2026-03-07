@@ -6,7 +6,7 @@ use crossterm::{
     execute,
     terminal::enable_raw_mode,
 };
-use git2::Repository;
+use git2::{BranchType, Repository};
 use ratatui::{
     DefaultTerminal, Frame, Terminal, TerminalOptions,
     prelude::CrosstermBackend,
@@ -26,19 +26,7 @@ fn main() -> color_eyre::Result<()> {
 
     let repo = Repository::open(".")?;
 
-    let branch_names: Vec<String> = repo
-        .branches(None)?
-        .take(8)
-        .filter(Result::is_ok)
-        .map(Result::unwrap)
-        .map(|(branch, _)| {
-            branch
-                .name()
-                .unwrap()
-                .unwrap_or("[unnamed_branch]")
-                .to_owned()
-        })
-        .collect();
+    let branch_names: Vec<String> = branches_sorted_by_commit_date(&repo)?;
 
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout());
@@ -62,7 +50,7 @@ fn main() -> color_eyre::Result<()> {
 
     let app_outcome = app_result?;
     if let Some(selected_branch_name) = app_outcome {
-        println!("Selected: {}", selected_branch_name);
+        checkout_branch_strict(&repo, &selected_branch_name)?;
     }
     Ok(())
 }
@@ -134,4 +122,32 @@ fn render(frame: &mut Frame, app: &App) {
             }),
     );
     frame.render_widget(list, frame.area());
+}
+
+fn branches_sorted_by_commit_date(repo: &Repository) -> Result<Vec<String>, git2::Error> {
+    let mut branches: Vec<(String, i64)> = repo
+        .branches(Some(BranchType::Local))?
+        .filter_map(|b| {
+            let (branch, _) = b.ok()?;
+            let name = branch.name().ok()??.to_string();
+            let commit = branch.get().peel_to_commit().ok()?;
+            let time = commit.time().seconds();
+            Some((name, time))
+        })
+        .collect();
+
+    branches.sort_by(|a, b| b.1.cmp(&a.1));
+
+    Ok(branches.into_iter().map(|(name, _)| name).take(8).collect())
+}
+
+fn checkout_branch_strict(repo: &Repository, branch_name: &str) -> Result<(), git2::Error> {
+    let branch = repo.find_branch(branch_name, BranchType::Local)?;
+    let ref_name = branch.get().name().unwrap();
+
+    let object = repo.revparse_single(&format!("refs/heads/{}", branch_name))?;
+    repo.checkout_tree(&object, None)?;
+    repo.set_head(ref_name)?;
+
+    Ok(())
 }
