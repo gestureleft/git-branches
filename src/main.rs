@@ -83,6 +83,12 @@ impl App {
             {
                 break Ok(None);
             }
+            if let KeyCode::Char(char) = code
+                && let Some(digit) = char.to_digit(10).map(|d| d as usize)
+                && let Some(selected_branch_hame) = self.branch_names.clone().into_iter().nth(digit)
+            {
+                break Ok(Some(selected_branch_hame));
+            }
             if code == KeyCode::Down {
                 self.selected_branch_index = self.selected_branch_index + 1;
                 if self.selected_branch_index >= self.branch_names.len() {
