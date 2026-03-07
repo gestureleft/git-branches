@@ -6,7 +6,7 @@ use crossterm::{
     execute,
     terminal::enable_raw_mode,
 };
-use git2::{BranchType, Repository};
+use git2::{BranchType, Object, Repository};
 use ratatui::{
     DefaultTerminal, Frame, Terminal, TerminalOptions,
     prelude::CrosstermBackend,
@@ -26,7 +26,7 @@ fn main() -> color_eyre::Result<()> {
 
     let repo = Repository::open(".")?;
 
-    let branch_names: Vec<String> = branches_sorted_by_commit_date(&repo)?;
+    let branches = branches_sorted_by_commit_date(&repo)?;
 
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout());
@@ -38,7 +38,7 @@ fn main() -> color_eyre::Result<()> {
     )?;
 
     let app = App {
-        branch_names,
+        branches,
         selected_branch_index: 0,
     };
     let app_result = app.run(terminal);
@@ -49,21 +49,28 @@ fn main() -> color_eyre::Result<()> {
     println!();
 
     let app_outcome = app_result?;
-    if let Some(selected_branch_name) = app_outcome {
-        checkout_branch_strict(&repo, &selected_branch_name)?;
+    if let Some(selected_branch) = app_outcome {
+        repo.checkout_tree(&selected_branch.object, None)?;
+        repo.set_head(&format!("refs/heads/{}", selected_branch.name))?;
     }
     Ok(())
 }
 
-struct App {
-    branch_names: Vec<String>,
+#[derive(Clone)]
+struct Branch<'repo> {
+    name: String,
+    object: Object<'repo>,
+}
+
+struct App<'repo> {
+    branches: Vec<Branch<'repo>>,
     selected_branch_index: usize,
 }
 
-type AppOutcome = Option<String>;
+type AppOutcome<'repo> = Option<Branch<'repo>>;
 
-impl App {
-    fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<AppOutcome> {
+impl<'repo> App<'repo> {
+    fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<AppOutcome<'repo>> {
         loop {
             terminal.draw(|f| render(f, &self))?;
             let Key(KeyEvent {
@@ -74,9 +81,10 @@ impl App {
             };
             if code == KeyCode::Enter {
                 break Ok(self
-                    .branch_names
-                    .into_iter()
-                    .nth(self.selected_branch_index));
+                    .branches
+                    .iter()
+                    .nth(self.selected_branch_index)
+                    .cloned());
             }
             if (code == KeyCode::Char('c') || code == KeyCode::Char('d'))
                 && modifiers.contains(KeyModifiers::CONTROL)
@@ -85,19 +93,19 @@ impl App {
             }
             if let KeyCode::Char(char) = code
                 && let Some(digit) = char.to_digit(10).map(|d| d as usize)
-                && let Some(selected_branch_hame) = self.branch_names.clone().into_iter().nth(digit)
+                && let Some(selected_branch_hame) = self.branches.iter().nth(digit).cloned()
             {
                 break Ok(Some(selected_branch_hame));
             }
             if code == KeyCode::Down {
                 self.selected_branch_index = self.selected_branch_index + 1;
-                if self.selected_branch_index >= self.branch_names.len() {
+                if self.selected_branch_index >= self.branches.len() {
                     self.selected_branch_index = 0;
                 }
             }
             if code == KeyCode::Up {
                 if self.selected_branch_index == 0 {
-                    self.selected_branch_index = self.branch_names.len() - 1;
+                    self.selected_branch_index = self.branches.len() - 1;
                 } else {
                     self.selected_branch_index = self.selected_branch_index - 1;
                 }
@@ -108,12 +116,12 @@ impl App {
 
 fn render(frame: &mut Frame, app: &App) {
     let list = List::new(
-        app.branch_names
+        app.branches
             .iter()
             .enumerate()
-            .map(|(branch_index, branch_name)| {
+            .map(|(branch_index, branch)| {
                 ListItem::new(
-                    Span::raw(format!(" {}  {}", branch_index, branch_name))
+                    Span::raw(format!(" {}  {}", branch_index, branch.name))
                         .fg(if branch_index == app.selected_branch_index {
                             TEXT_SELECTED_FG_COLOUR
                         } else {
@@ -130,30 +138,27 @@ fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(list, frame.area());
 }
 
-fn branches_sorted_by_commit_date(repo: &Repository) -> Result<Vec<String>, git2::Error> {
-    let mut branches: Vec<(String, i64)> = repo
+fn branches_sorted_by_commit_date<'repo>(
+    repo: &'repo Repository,
+) -> Result<Vec<Branch<'repo>>, git2::Error> {
+    let mut branches: Vec<(String, Object, i64)> = repo
         .branches(Some(BranchType::Local))?
         .filter_map(|b| {
             let (branch, _) = b.ok()?;
+            let binding = branch.get().peel_to_commit().ok()?;
+            let object = binding.as_object();
             let name = branch.name().ok()??.to_string();
             let commit = branch.get().peel_to_commit().ok()?;
             let time = commit.time().seconds();
-            Some((name, time))
+            Some((name, object.clone(), time))
         })
         .collect();
 
-    branches.sort_by(|a, b| b.1.cmp(&a.1));
+    branches.sort_by(|a, b| b.2.cmp(&a.2));
 
-    Ok(branches.into_iter().map(|(name, _)| name).take(8).collect())
-}
-
-fn checkout_branch_strict(repo: &Repository, branch_name: &str) -> Result<(), git2::Error> {
-    let branch = repo.find_branch(branch_name, BranchType::Local)?;
-    let ref_name = branch.get().name().unwrap();
-
-    let object = repo.revparse_single(&format!("refs/heads/{}", branch_name))?;
-    repo.checkout_tree(&object, None)?;
-    repo.set_head(ref_name)?;
-
-    Ok(())
+    Ok(branches
+        .into_iter()
+        .take(8)
+        .map(|(name, object, _)| Branch { name, object })
+        .collect())
 }
