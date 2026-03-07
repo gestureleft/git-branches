@@ -2,7 +2,7 @@ use std::io::stdout;
 
 use crossterm::{
     cursor::MoveToColumn,
-    event::{Event::Key, KeyCode, KeyEvent},
+    event::{Event::Key, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::enable_raw_mode,
 };
@@ -60,9 +60,10 @@ fn main() -> color_eyre::Result<()> {
     execute!(stdout, MoveToColumn(0))?;
     println!();
 
-    let app = app_result?;
-    let selected_branch_name = &app.branch_names[app.selected_branch_index];
-    println!("Selected: {}", selected_branch_name);
+    let app_outcome = app_result?;
+    if let Some(selected_branch_name) = app_outcome {
+        println!("Selected: {}", selected_branch_name);
+    }
     Ok(())
 }
 
@@ -71,15 +72,28 @@ struct App {
     selected_branch_index: usize,
 }
 
+type AppOutcome = Option<String>;
+
 impl App {
-    fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<Self> {
+    fn run(mut self, mut terminal: DefaultTerminal) -> std::io::Result<AppOutcome> {
         loop {
             terminal.draw(|f| render(f, &self))?;
-            let Key(KeyEvent { code, .. }) = crossterm::event::read()? else {
+            let Key(KeyEvent {
+                code, modifiers, ..
+            }) = crossterm::event::read()?
+            else {
                 continue;
             };
             if code == KeyCode::Enter {
-                break Ok(self);
+                break Ok(self
+                    .branch_names
+                    .into_iter()
+                    .nth(self.selected_branch_index));
+            }
+            if (code == KeyCode::Char('c') || code == KeyCode::Char('d'))
+                && modifiers.contains(KeyModifiers::CONTROL)
+            {
+                break Ok(None);
             }
             if code == KeyCode::Down {
                 self.selected_branch_index = self.selected_branch_index + 1;
