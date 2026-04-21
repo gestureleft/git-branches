@@ -86,9 +86,8 @@ impl<'repo> App<'repo> {
                     .nth(self.selected_branch_index)
                     .cloned());
             }
-            if (code == KeyCode::Char('c') || code == KeyCode::Char('d'))
-                && modifiers.contains(KeyModifiers::CONTROL)
-            {
+            let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+            if (code == KeyCode::Char('c') || code == KeyCode::Char('d')) && ctrl {
                 break Ok(None);
             }
             if let KeyCode::Char(char) = code
@@ -97,13 +96,15 @@ impl<'repo> App<'repo> {
             {
                 break Ok(Some(selected_branch_hame));
             }
-            if code == KeyCode::Down {
+            let emacs_down = ctrl && matches!(code, KeyCode::Char('n'));
+            if code == KeyCode::Down || emacs_down {
                 self.selected_branch_index = self.selected_branch_index + 1;
                 if self.selected_branch_index >= self.branches.len() {
                     self.selected_branch_index = 0;
                 }
             }
-            if code == KeyCode::Up {
+            let emacs_up = ctrl && matches!(code, KeyCode::Char('p'));
+            if code == KeyCode::Up || emacs_up {
                 if self.selected_branch_index == 0 {
                     self.selected_branch_index = self.branches.len() - 1;
                 } else {
