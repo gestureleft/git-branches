@@ -1,4 +1,4 @@
-use std::io::stdout;
+use std::{io::stdout, iter};
 
 use crossterm::{
     cursor::MoveToColumn,
@@ -40,6 +40,7 @@ fn main() -> color_eyre::Result<()> {
     let app = App {
         branches,
         selected_branch_index: 0,
+        search_query: "".into(),
     };
     let app_result = app.run(terminal);
 
@@ -65,6 +66,7 @@ struct Branch<'repo> {
 struct App<'repo> {
     branches: Vec<Branch<'repo>>,
     selected_branch_index: usize,
+    search_query: String,
 }
 
 type AppOutcome<'repo> = Option<Branch<'repo>>;
@@ -79,63 +81,95 @@ impl<'repo> App<'repo> {
             else {
                 continue;
             };
+            // Select current branch
             if code == KeyCode::Enter {
                 break Ok(self
-                    .branches
-                    .iter()
+                    .filtered_branches()
                     .nth(self.selected_branch_index)
                     .cloned());
             }
             let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+            // Exit with ctrl + c / d
             if (code == KeyCode::Char('c') || code == KeyCode::Char('d')) && ctrl {
                 break Ok(None);
             }
+
+            let filtered_branches_count = self.filtered_branches().count();
+            // Code is a number -> selected a branch
             if let KeyCode::Char(char) = code
                 && let Some(digit) = char.to_digit(10).map(|d| d as usize)
-                && let Some(selected_branch_hame) = self.branches.iter().nth(digit).cloned()
+                && let Some(selected_branch_hame) = self.filtered_branches().nth(digit).cloned()
             {
                 break Ok(Some(selected_branch_hame));
             }
             let emacs_down = ctrl && matches!(code, KeyCode::Char('n'));
+            // Navigate down with arrow or emacs binding
             if code == KeyCode::Down || emacs_down {
                 self.selected_branch_index = self.selected_branch_index + 1;
-                if self.selected_branch_index >= self.branches.len() {
+                if self.selected_branch_index >= filtered_branches_count {
                     self.selected_branch_index = 0;
                 }
+                continue;
             }
+            // Navigate up with arrow or emacs binding
             let emacs_up = ctrl && matches!(code, KeyCode::Char('p'));
             if code == KeyCode::Up || emacs_up {
                 if self.selected_branch_index == 0 {
-                    self.selected_branch_index = self.branches.len() - 1;
+                    self.selected_branch_index = filtered_branches_count - 1;
                 } else {
                     self.selected_branch_index = self.selected_branch_index - 1;
                 }
+                continue;
+            }
+
+            // Append to search term
+            if let KeyCode::Char(char) = code
+                && char.is_ascii_alphabetic()
+            {
+                self.search_query.push(char);
+                continue;
+            }
+
+            // Delete last character appended to search term
+            if let KeyCode::Backspace = code {
+                self.search_query.pop();
+                continue;
             }
         }
+    }
+
+    fn filtered_branches(self: &Self) -> impl Iterator<Item = &Branch<'repo>> {
+        self.branches
+            .iter()
+            .filter(|branch| branch.name.starts_with(&self.search_query))
     }
 }
 
 fn render(frame: &mut Frame, app: &App) {
-    let list = List::new(
-        app.branches
-            .iter()
-            .enumerate()
-            .map(|(branch_index, branch)| {
-                ListItem::new(
-                    Span::raw(format!(" {}  {}", branch_index, branch.name))
-                        .fg(if branch_index == app.selected_branch_index {
-                            TEXT_SELECTED_FG_COLOUR
-                        } else {
-                            TEXT_UNSELECTED_FG_COLOUR
-                        })
-                        .bg(if branch_index == app.selected_branch_index {
-                            TEXT_SELECTED_BG_COLOUR
-                        } else {
-                            TEXT_UNSELECTED_BG_COLOUR
-                        }),
-                )
-            }),
-    );
+    let list =
+        List::new(
+            iter::once(ListItem::new(Span::raw(format!(
+                "Search term: {}",
+                &app.search_query
+            ))))
+            .chain(app.filtered_branches().enumerate().map(
+                |(branch_index, branch)| {
+                    ListItem::new(
+                        Span::raw(format!(" {}  {}", branch_index, branch.name))
+                            .fg(if branch_index == app.selected_branch_index {
+                                TEXT_SELECTED_FG_COLOUR
+                            } else {
+                                TEXT_UNSELECTED_FG_COLOUR
+                            })
+                            .bg(if branch_index == app.selected_branch_index {
+                                TEXT_SELECTED_BG_COLOUR
+                            } else {
+                                TEXT_UNSELECTED_BG_COLOUR
+                            }),
+                    )
+                },
+            )),
+        );
     frame.render_widget(list, frame.area());
 }
 
@@ -159,7 +193,6 @@ fn branches_sorted_by_commit_date<'repo>(
 
     Ok(branches
         .into_iter()
-        .take(8)
         .map(|(name, object, _)| Branch { name, object })
         .collect())
 }
