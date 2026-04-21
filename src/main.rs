@@ -95,8 +95,10 @@ impl<'repo> App<'repo> {
             }
 
             let filtered_branches_count = self.filtered_branches().count();
-            // Code is a number -> selected a branch
+            let option = modifiers.contains(KeyModifiers::ALT);
+            // Code is option + a number -> selected a branch
             if let KeyCode::Char(char) = code
+                && option
                 && let Some(digit) = char.to_digit(10).map(|d| d as usize)
                 && let Some(selected_branch_hame) = self.filtered_branches().nth(digit).cloned()
             {
