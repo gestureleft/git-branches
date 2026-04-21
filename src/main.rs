@@ -114,8 +114,8 @@ impl<'repo> App<'repo> {
                 }
                 continue;
             }
-            // Navigate up with arrow or emacs binding
             let emacs_up = ctrl && matches!(code, KeyCode::Char('p'));
+            // Navigate up with arrow or emacs binding
             if code == KeyCode::Up || emacs_up {
                 if self.selected_branch_index == 0 {
                     self.selected_branch_index = filtered_branches_count - 1;
@@ -125,15 +125,21 @@ impl<'repo> App<'repo> {
                 continue;
             }
 
-            // Append to search term
-            if let KeyCode::Char(char) = code {
-                self.search_query.push(char);
+            // Clear search term with cmd+backspace (ctrl+u) or ctrl+backspace (ctrl+h)
+            if ctrl && matches!(code, KeyCode::Char('u')) {
+                self.search_query.clear();
                 continue;
             }
 
             // Delete last character appended to search term
             if let KeyCode::Backspace = code {
                 self.search_query.pop();
+                continue;
+            }
+
+            // Append to search term
+            if let KeyCode::Char(char) = code {
+                self.search_query.push(char);
                 continue;
             }
         }
