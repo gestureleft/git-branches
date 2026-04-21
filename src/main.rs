@@ -123,9 +123,7 @@ impl<'repo> App<'repo> {
             }
 
             // Append to search term
-            if let KeyCode::Char(char) = code
-                && char.is_ascii_alphabetic()
-            {
+            if let KeyCode::Char(char) = code {
                 self.search_query.push(char);
                 continue;
             }
