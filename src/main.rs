@@ -1,3 +1,4 @@
+use frizbee::{Config, Matcher};
 use std::{io::stdout, iter};
 
 use crossterm::{
@@ -139,9 +140,17 @@ impl<'repo> App<'repo> {
     }
 
     fn filtered_branches(self: &Self) -> impl Iterator<Item = &Branch<'repo>> {
-        self.branches
-            .iter()
-            .filter(|branch| branch.name.starts_with(&self.search_query))
+        let haystacks: Vec<&String> = self.branches.iter().map(|branch| &branch.name).collect();
+
+        let config = Config {
+            max_typos: Some(3),
+            ..Config::default()
+        };
+
+        Matcher::new(&self.search_query, &config)
+            .match_list_indices(&haystacks)
+            .into_iter()
+            .filter_map(|m| self.branches.get(m.index as usize))
     }
 }
 
