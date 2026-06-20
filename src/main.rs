@@ -22,6 +22,8 @@ const TEXT_SELECTED_BG_COLOUR: Color = Color::White;
 const TEXT_UNSELECTED_FG_COLOUR: Color = Color::White;
 const TEXT_UNSELECTED_BG_COLOUR: Color = Color::Reset;
 
+const RESULTS_PER_PAGE: u16 = 8;
+
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
@@ -34,13 +36,15 @@ fn main() -> color_eyre::Result<()> {
     let terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: ratatui::Viewport::Inline(8),
+            // Add one for the search term line
+            viewport: ratatui::Viewport::Inline(RESULTS_PER_PAGE + 1),
         },
     )?;
 
     let app = App {
         branches,
         selected_branch_index: 0,
+        offset: 0,
         search_query: "".into(),
     };
     let app_result = app.run(terminal);
@@ -67,6 +71,7 @@ struct Branch<'repo> {
 struct App<'repo> {
     branches: Vec<Branch<'repo>>,
     selected_branch_index: usize,
+    offset: usize,
     search_query: String,
 }
 
@@ -95,13 +100,13 @@ impl<'repo> App<'repo> {
                 break Ok(None);
             }
 
-            let filtered_branches_count = self.filtered_branches().count();
             let option = modifiers.contains(KeyModifiers::ALT);
             // Code is option + a number -> selected a branch
             if let KeyCode::Char(char) = code
                 && option
                 && let Some(digit) = char.to_digit(10).map(|d| d as usize)
-                && let Some(selected_branch_hame) = self.filtered_branches().nth(digit).cloned()
+                && let Some(selected_branch_hame) =
+                    self.filtered_branches().nth(digit + self.offset).cloned()
             {
                 break Ok(Some(selected_branch_hame));
             }
@@ -109,8 +114,12 @@ impl<'repo> App<'repo> {
             // Navigate down with arrow or emacs binding
             if code == KeyCode::Down || emacs_down {
                 self.selected_branch_index = self.selected_branch_index + 1;
-                if self.selected_branch_index >= filtered_branches_count {
+                if self.selected_branch_index >= RESULTS_PER_PAGE.into() {
+                    self.offset += 1;
+                }
+                if self.selected_branch_index >= self.filtered_branches().count() {
                     self.selected_branch_index = 0;
+                    self.offset = 0;
                 }
                 continue;
             }
@@ -118,9 +127,12 @@ impl<'repo> App<'repo> {
             // Navigate up with arrow or emacs binding
             if code == KeyCode::Up || emacs_up {
                 if self.selected_branch_index == 0 {
-                    self.selected_branch_index = filtered_branches_count - 1;
+                    self.selected_branch_index = (RESULTS_PER_PAGE as usize) - 1;
                 } else {
                     self.selected_branch_index = self.selected_branch_index - 1;
+                }
+                if self.selected_branch_index < self.offset {
+                    self.offset -= 1;
                 }
                 continue;
             }
@@ -161,16 +173,19 @@ impl<'repo> App<'repo> {
 }
 
 fn render(frame: &mut Frame, app: &App) {
-    let list =
-        List::new(
-            iter::once(ListItem::new(Span::raw(format!(
-                "Search term: {}",
-                &app.search_query
-            ))))
-            .chain(app.filtered_branches().enumerate().map(
-                |(branch_index, branch)| {
+    let list = List::new(
+        iter::once(ListItem::new(Span::raw(format!(
+            "Search term: {}",
+            &app.search_query
+        ))))
+        .chain(
+            app.filtered_branches()
+                .enumerate()
+                .skip(app.offset)
+                .take(RESULTS_PER_PAGE as usize)
+                .map(|(branch_index, branch)| {
                     ListItem::new(
-                        Span::raw(format!(" {}  {}", branch_index, branch.name))
+                        Span::raw(format!(" {}  {}", branch_index - app.offset, branch.name))
                             .fg(if branch_index == app.selected_branch_index {
                                 TEXT_SELECTED_FG_COLOUR
                             } else {
@@ -182,9 +197,9 @@ fn render(frame: &mut Frame, app: &App) {
                                 TEXT_UNSELECTED_BG_COLOUR
                             }),
                     )
-                },
-            )),
-        );
+                }),
+        ),
+    );
     frame.render_widget(list, frame.area());
 }
 
